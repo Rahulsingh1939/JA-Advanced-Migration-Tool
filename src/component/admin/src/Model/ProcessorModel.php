@@ -83,10 +83,11 @@ class ProcessorModel extends BaseDatabaseModel
      *
      * @param   callable $processor The function containing the import logic.
      * @param   array    &$result   The result array, passed by reference.
+     * @param   ?MediaModel $mediaModel Optional media model to clean up on failure.
      *
      * @return  void
      */
-    private function executeInTransaction(callable $processor, array &$result): void
+    private function executeInTransaction(callable $processor, array &$result, ?MediaModel $mediaModel = null): void
     {
         $this->db->transactionStart();
         try {
@@ -97,11 +98,21 @@ class ProcessorModel extends BaseDatabaseModel
             } else {
                 $this->db->transactionRollback();
                 $result['success'] = false;
+                
+                // Clean up downloaded media files if transaction failed
+                if ($mediaModel) {
+                    $this->cleanupDownloadedMedia($mediaModel);
+                }
             }
         } catch (\Exception $e) {
             $this->db->transactionRollback();
             $result['success'] = false;
             $result['errors'][] = 'Import failed: ' . $e->getMessage();
+            
+            // Clean up downloaded media files if transaction failed
+            if ($mediaModel) {
+                $this->cleanupDownloadedMedia($mediaModel);
+            }
         }
     }
 
@@ -122,9 +133,9 @@ class ProcessorModel extends BaseDatabaseModel
             'errors'  => []
         ];
 
-        $this->executeInTransaction(function () use ($data, $sourceUrl, $ftpConfig, &$result) {
-            $mediaModel = $this->initializeMediaModel($ftpConfig);
-
+        $mediaModel = $this->initializeMediaModel($ftpConfig);
+        
+        $this->executeInTransaction(function () use ($data, $sourceUrl, $ftpConfig, &$result, $mediaModel) {
             $userMap = [];
             if (!empty($data['users'])) {
                 $userResult = $this->processUsers($data['users'], $result['counts']);
@@ -153,7 +164,7 @@ class ProcessorModel extends BaseDatabaseModel
             if ($mediaModel) {
                 $result['counts']['media'] = $mediaModel->getMediaStats()['downloaded'];
             }
-        }, $result);
+        }, $result, $mediaModel);
 
         if (!$result['success']) {
             $this->updateProgress(100, 'Migration failed!');
@@ -196,8 +207,9 @@ class ProcessorModel extends BaseDatabaseModel
             return $result;
         }
 
-        $this->executeInTransaction(function () use ($data, $sourceUrl, $ftpConfig, $importAsSuperUser, &$result) {
-            $mediaModel = $this->initializeMediaModel($ftpConfig);
+        $mediaModel = $this->initializeMediaModel($ftpConfig);
+        
+        $this->executeInTransaction(function () use ($data, $sourceUrl, $ftpConfig, $importAsSuperUser, &$result, $mediaModel) {
             $superUserId = $importAsSuperUser ? Factory::getUser()->id : null;
             $total = count($data['itemListElement']);
             
@@ -207,7 +219,7 @@ class ProcessorModel extends BaseDatabaseModel
             if ($mediaModel) {
                 $result['counts']['media'] = $mediaModel->getMediaStats()['downloaded'];
             }
-        }, $result);
+        }, $result, $mediaModel);
 
         if (!$result['success']) {
             $this->updateProgress(100, 'Migration failed!');
@@ -1083,5 +1095,41 @@ class ProcessorModel extends BaseDatabaseModel
             ->where('title = ' . $this->db->quote($title));
 
         return (bool) $this->db->setQuery($query)->loadResult();
+    }
+
+    /**
+     * Clean up downloaded media files when transaction fails
+     *
+     * @param   MediaModel $mediaModel The media model instance
+     *
+     * @return  void
+     *
+     * @since   1.0.0
+     */
+    private function cleanupDownloadedMedia(MediaModel $mediaModel): void
+    {
+        try {
+            $mediaStats = $mediaModel->getMediaStats();
+            $downloadedFiles = $mediaStats['files'] ?? [];
+            
+            if (!empty($downloadedFiles)) {
+                Factory::getApplication()->enqueueMessage(
+                    sprintf('Transaction failed. Cleaning up %d downloaded media files...', count($downloadedFiles)),
+                    'warning'
+                );
+                
+                $mediaModel->cleanupDownloadedFiles();
+                
+                Factory::getApplication()->enqueueMessage(
+                    'Downloaded media files cleaned up successfully.',
+                    'info'
+                );
+            }
+        } catch (\Exception $e) {
+            Factory::getApplication()->enqueueMessage(
+                'Warning: Could not clean up downloaded media files: ' . $e->getMessage(),
+                'warning'
+            );
+        }
     }
 }

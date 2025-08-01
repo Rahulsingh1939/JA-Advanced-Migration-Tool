@@ -551,10 +551,11 @@ class MediaModel extends BaseDatabaseModel
             ['www', 'wp-content'],
             // WordPress in root directory
             ['', 'wp-content'],
-            // Direct uploads folder scenarios
+            // Standard document roots with direct uploads
             ['httpdocs', 'uploads'],
             ['public_html', 'uploads'],
             ['www', 'uploads'],
+            // Direct uploads folder in root
             ['', 'uploads']
         ];
 
@@ -1155,19 +1156,36 @@ class MediaModel extends BaseDatabaseModel
             'info'
         );
 
-        // Process downloads in smaller parallel batches to avoid overwhelming the server
-        $batchSize = min(10, count($downloadTasks)); // Max 10 parallel connections
-        $taskBatches = array_chunk($downloadTasks, $batchSize, true);
+        $initialDownloadCount = count($this->downloadedFiles);
 
-        foreach ($taskBatches as $batch) {
-            $this->processBatchDownload($batch, $results);
+        try {
+            // Process downloads in smaller parallel batches to avoid overwhelming the server
+            $batchSize = min(10, count($downloadTasks)); // Max 10 parallel connections
+            $taskBatches = array_chunk($downloadTasks, $batchSize, true);
+
+            foreach ($taskBatches as $batch) {
+                $this->processBatchDownload($batch, $results);
+            }
+
+            $successCount = count(array_filter($results, function($result) { return $result['success']; }));
+            Factory::getApplication()->enqueueMessage(
+                sprintf('✅ Batch download complete: %d/%d files downloaded successfully', $successCount, count($results)),
+                'info'
+            );
+        } catch (\Exception $e) {
+            // If batch download fails, clean up any files downloaded in this batch
+            $currentDownloadCount = count($this->downloadedFiles);
+            if ($currentDownloadCount > $initialDownloadCount) {
+                Factory::getApplication()->enqueueMessage(
+                    sprintf('Media download failed. Cleaning up %d partially downloaded files...', $currentDownloadCount - $initialDownloadCount),
+                    'warning'
+                );
+                
+                $this->cleanupPartialDownload($initialDownloadCount);
+            }
+            
+            throw $e; // Re-throw the exception for higher-level handling
         }
-
-        $successCount = count(array_filter($results, function($result) { return $result['success']; }));
-        Factory::getApplication()->enqueueMessage(
-            sprintf('✅ Batch download complete: %d/%d files downloaded successfully', $successCount, count($results)),
-            'info'
-        );
 
         return $results;
     }
@@ -1339,6 +1357,155 @@ class MediaModel extends BaseDatabaseModel
             'downloaded' => count($this->downloadedFiles),
             'files' => array_keys($this->downloadedFiles)
         ];
+    }
+
+    /**
+     * Clean up downloaded media files from the filesystem
+     * Used when migration transaction fails to avoid orphaned files
+     *
+     * @return  void
+     *
+     * @since   1.0.0
+     */
+    public function cleanupDownloadedFiles(): void
+    {
+        $cleanedCount = 0;
+        $errorCount = 0;
+        
+        foreach ($this->downloadedFiles as $remotePath => $joomlaUrl) {
+            try {
+                // Convert Joomla URL back to local file path
+                $relativePath = str_replace($this->mediaBaseUrl, '', $joomlaUrl);
+                $localFilePath = $this->mediaBasePath . $relativePath;
+                
+                if (File::exists($localFilePath)) {
+                    if (File::delete($localFilePath)) {
+                        $cleanedCount++;
+                        
+                        // Try to remove empty parent directories
+                        $this->removeEmptyParentDirectories(dirname($localFilePath));
+                    } else {
+                        $errorCount++;
+                    }
+                }
+            } catch (\Exception $e) {
+                $errorCount++;
+                Factory::getApplication()->enqueueMessage(
+                    sprintf('Error cleaning up file %s: %s', $remotePath, $e->getMessage()),
+                    'warning'
+                );
+            }
+        }
+        
+        // Clear the downloaded files array
+        $this->downloadedFiles = [];
+        
+        if ($cleanedCount > 0) {
+            Factory::getApplication()->enqueueMessage(
+                sprintf('Cleaned up %d downloaded media files.', $cleanedCount),
+                'info'
+            );
+        }
+        
+        if ($errorCount > 0) {
+            Factory::getApplication()->enqueueMessage(
+                sprintf('Failed to clean up %d media files.', $errorCount),
+                'warning'
+            );
+        }
+    }
+
+    /**
+     * Remove empty parent directories recursively
+     *
+     * @param   string  $directory  The directory path to check
+     *
+     * @return  void
+     *
+     * @since   1.0.0
+     */
+    private function removeEmptyParentDirectories(string $directory): void
+    {
+        try {
+            // Don't remove the base storage directory
+            if ($directory === $this->mediaBasePath || $directory === dirname($this->mediaBasePath)) {
+                return;
+            }
+            
+            if (Folder::exists($directory) && $this->isDirectoryEmpty($directory)) {
+                if (Folder::delete($directory)) {
+                    // Recursively check parent directory
+                    $this->removeEmptyParentDirectories(dirname($directory));
+                }
+            }
+        } catch (\Exception $e) {
+            // Silently ignore errors when cleaning up directories
+        }
+    }
+
+    /**
+     * Check if a directory is empty
+     *
+     * @param   string  $directory  The directory path to check
+     *
+     * @return  bool  True if directory is empty, false otherwise
+     *
+     * @since   1.0.0
+     */
+    private function isDirectoryEmpty(string $directory): bool
+    {
+        try {
+            $files = Folder::files($directory, '.', false, true);
+            $folders = Folder::folders($directory, '.', false, true);
+            
+            return empty($files) && empty($folders);
+        } catch (\Exception $e) {
+            return false;
+        }
+    }
+
+    /**
+     * Clean up partially downloaded files (when batch download fails)
+     *
+     * @param   int  $initialCount  The initial count of downloaded files before this batch
+     *
+     * @return  void
+     *
+     * @since   1.0.0
+     */
+    private function cleanupPartialDownload(int $initialCount): void
+    {
+        $downloadedPaths = array_keys($this->downloadedFiles);
+        $partialPaths = array_slice($downloadedPaths, $initialCount);
+        
+        $cleanedCount = 0;
+        
+        foreach ($partialPaths as $remotePath) {
+            try {
+                $joomlaUrl = $this->downloadedFiles[$remotePath];
+                $relativePath = str_replace($this->mediaBaseUrl, '', $joomlaUrl);
+                $localFilePath = $this->mediaBasePath . $relativePath;
+                
+                if (File::exists($localFilePath)) {
+                    if (File::delete($localFilePath)) {
+                        $cleanedCount++;
+                        $this->removeEmptyParentDirectories(dirname($localFilePath));
+                    }
+                }
+                
+                // Remove from tracking array
+                unset($this->downloadedFiles[$remotePath]);
+            } catch (\Exception $e) {
+                // Silently handle cleanup errors
+            }
+        }
+        
+        if ($cleanedCount > 0) {
+            Factory::getApplication()->enqueueMessage(
+                sprintf('Cleaned up %d partially downloaded files.', $cleanedCount),
+                'info'
+            );
+        }
     }
 
     /**
@@ -1548,6 +1715,7 @@ class MediaModel extends BaseDatabaseModel
     {
         $commonRoots = ['httpdocs', 'public_html', 'www'];
         
+        // First check common document roots with wp-content
         foreach ($commonRoots as $root) {
             if (@ftp_chdir($connection, $root)) {
                 // Try to find wp-content directory to confirm this is the right root
@@ -1559,6 +1727,18 @@ class MediaModel extends BaseDatabaseModel
                 // Return to original directory if wp-content not found
                 @ftp_chdir($connection, '/');
             }
+        }
+        
+        // Check for direct wp-content in root
+        if (@ftp_chdir($connection, 'wp-content')) {
+            @ftp_chdir($connection, '/');
+            return '.';
+        }
+        
+        // Check for direct uploads folder in root
+        if (@ftp_chdir($connection, 'uploads')) {
+            @ftp_chdir($connection, '/');
+            return '.';
         }
         
         return null;
@@ -1577,6 +1757,7 @@ class MediaModel extends BaseDatabaseModel
     {
         $commonRoots = ['httpdocs', 'public_html', 'www'];
         
+        // First check common document roots with wp-content
         foreach ($commonRoots as $root) {
             try {
                 // Check if directory exists and has wp-content
@@ -1586,6 +1767,24 @@ class MediaModel extends BaseDatabaseModel
             } catch (\Exception $e) {
                 // Continue to next root
             }
+        }
+        
+        // Check for direct wp-content in root
+        try {
+            if ($sftp->is_dir('wp-content')) {
+                return '.';
+            }
+        } catch (\Exception $e) {
+            // Continue to next check
+        }
+        
+        // Check for direct uploads folder in root
+        try {
+            if ($sftp->is_dir('uploads')) {
+                return '.';
+            }
+        } catch (\Exception $e) {
+            // Continue
         }
         
         return null;
