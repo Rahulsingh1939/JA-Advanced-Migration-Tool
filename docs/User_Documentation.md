@@ -420,3 +420,5 @@ A: Use the ZIP upload method for large media libraries, or configure FTP with in
 A: Yes, including directory structure. File conflicts are handled with numerical suffixes.
 
 ---
+
+> **For developer and testing information, see [Developer Documentation](./Developer_Documentation.md) and [Testing Documentation](./Testing_Documentation.md). For creating new CMS plugins, see [Plugin Development Guide](./Plugin_Development_Guide.md).**
