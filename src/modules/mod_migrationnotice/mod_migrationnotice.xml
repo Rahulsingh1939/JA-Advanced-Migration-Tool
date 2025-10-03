@@ -10,7 +10,7 @@
 <extension type="module" version="5.0" client="site" method="upgrade">
     <name>MOD_MIGRATIONNOTICE</name>
     <description>MOD_MIGRATIONNOTICE_XML_DESCRIPTION</description>
-    <version>1.0.0</version>
+    <version>1.0.1</version>
     <author>Joomla Academy</author>
     <authorEmail></authorEmail>
     <authorUrl></authorUrl>
