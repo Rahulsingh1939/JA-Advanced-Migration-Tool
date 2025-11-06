@@ -2,7 +2,6 @@
 
 namespace Joomla\Component\CmsMigrator\Tests\Integration;
 
-use Joomla\Component\CmsMigrator\Administrator\Extension\CmsMigratorComponent;
 use Joomla\Component\CmsMigrator\Administrator\Controller\ImportController;
 use Joomla\Component\CmsMigrator\Administrator\Model\ImportModel;
 use Joomla\Component\CmsMigrator\Administrator\Event\MigrationEvent;
@@ -49,18 +48,6 @@ class ComponentIntegrationTest extends TestCase
     {
         TestHelper::cleanup(array_merge($this->tempFiles, $this->tempDirs));
         parent::tearDown();
-    }
-
-    /**
-     * Test component can be instantiated and initialized
-     */
-    public function testComponentCanBeInstantiatedAndInitialized(): void
-    {
-        $component = new CmsMigratorComponent();
-        
-        $this->assertInstanceOf(CmsMigratorComponent::class, $component);
-        $this->assertInstanceOf(\Joomla\CMS\Extension\MVCComponent::class, $component);
-        $this->assertInstanceOf(\Joomla\CMS\Extension\BootableExtensionInterface::class, $component);
     }
 
     /**
@@ -352,7 +339,6 @@ class ComponentIntegrationTest extends TestCase
     public function testComponentNamespaceAndAutoloading(): void
     {
         $expectedClasses = [
-            'Joomla\Component\CmsMigrator\Administrator\Extension\CmsMigratorComponent',
             'Joomla\Component\CmsMigrator\Administrator\Controller\DisplayController',
             'Joomla\Component\CmsMigrator\Administrator\Controller\ImportController',
             'Joomla\Component\CmsMigrator\Administrator\Model\ImportModel',

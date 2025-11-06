@@ -109,7 +109,6 @@ class ComponentPackageTest extends TestCase
             'admin/services/provider.php',
             'admin/sql/install.mysql.utf8.sql',
             'admin/sql/install.postgresql.utf8.sql',
-            'admin/src/Extension/CmsMigratorComponent.php',
             'admin/src/Controller/DisplayController.php',
             'admin/src/Controller/ImportController.php',
             'admin/src/Model/ImportModel.php',

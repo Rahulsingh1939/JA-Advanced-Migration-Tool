@@ -37,9 +37,6 @@ class ExampleTest extends TestCase
     public function testAutoloaderWorking(): void
     {
         $this->assertTrue(
-            class_exists('Joomla\Component\CmsMigrator\Administrator\Extension\CmsMigratorComponent')
-        );
-        $this->assertTrue(
             class_exists('Joomla\Component\CmsMigrator\Administrator\Controller\DisplayController')
         );
         $this->assertTrue(
