@@ -12,32 +12,21 @@ namespace Joomla\Component\CmsMigrator\Administrator\Event;
 \defined('_JEXEC') or die;
 
 use Joomla\CMS\Event\AbstractEvent;
+use Joomla\CMS\Event\Result\ResultAware;
+use Joomla\CMS\Event\Result\ResultAwareInterface;
+use Joomla\CMS\Event\Result\ResultTypeMixedAware;
 
 /**
  * Event class for migration operations.
+ * Results are stored under arguments['result'] via the ResultAware trait.
  */
-class MigrationEvent extends AbstractEvent
+final class MigrationEvent extends AbstractEvent implements ResultAwareInterface
 {
-    protected $arguments = [];
-
-    public function __construct(string $name, array $arguments = [])
-    {
-        parent::__construct($name);
-        $this->arguments = $arguments;
-    }
-
-    public function getArguments(): array
-    {
-        return $this->arguments;
-    }
-
-    public function addResult($result): void
-    {
-        $this->results[] = $result;
-    }
+    use ResultAware;
+    use ResultTypeMixedAware; // accept any result type
 
     public function getResults(): array
     {
-        return $this->results ?? [];
+        return $this->getArgument('result', []);
     }
 }

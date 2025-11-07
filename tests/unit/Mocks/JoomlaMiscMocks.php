@@ -39,17 +39,81 @@ namespace Joomla\CMS\Event;
 class AbstractEvent
 {
     protected $name;
-    protected $results = [];
-    
-    public function __construct($name)
+    protected $arguments = [];
+
+    public function __construct($name, array $arguments = [])
     {
         $this->name = $name;
+        $this->arguments = $arguments;
     }
-    
+
     public function getName()
     {
         return $this->name;
     }
+
+    public function getArguments()
+    {
+        return $this->arguments;
+    }
+
+    public function getArgument($name, $default = null)
+    {
+        return $this->arguments[$name] ?? $default;
+    }
+
+    public function setArgument($name, $value)
+    {
+        $this->arguments[$name] = $value;
+    }
+}
+
+namespace Joomla\CMS\Event\Result;
+
+/**
+ * Mock interface for ResultAwareInterface for testing
+ */
+interface ResultAwareInterface
+{
+}
+
+/**
+ * Mock trait for ResultAware for testing
+ */
+trait ResultAware
+{
+    /**
+     * Add a result to the event's result argument
+     *
+     * @param   mixed  $result  The result to add
+     *
+     * @return  void
+     */
+    public function addResult($result): void
+    {
+        $results = $this->getArgument('result', []);
+        $results[] = $result;
+        $this->setArgument('result', $results);
+    }
+
+    /**
+     * Get all results from the event
+     *
+     * @return  array  Array of results
+     */
+    public function getResults(): array
+    {
+        return $this->getArgument('result', []);
+    }
+}
+
+/**
+ * Mock trait for ResultTypeMixedAware for testing
+ * This trait allows events to accept any result type (mixed)
+ */
+trait ResultTypeMixedAware
+{
+    
 }
 
 namespace Joomla\CMS\HTML;
